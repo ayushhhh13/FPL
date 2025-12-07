@@ -1,0 +1,171 @@
+# GenAI Credit Card Assistant
+
+A microservices-based AI assistant for handling credit card customer queries and actions.
+
+## Architecture
+
+The application follows a microservices architecture with:
+- **Python Backend**: Main logic, classification, and agent orchestration
+- **Node.js API Service**: External API integrations and mock services
+- **SQLite Database**: Local data storage
+- **Streamlit UI**: Web interface for chat and voice interactions
+
+## Project Structure
+
+```
+ayush/
+├── python_backend/
+│   ├── app.py                 # Main FastAPI application
+│   ├── classifier.py          # LLM-based query classifier
+│   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── base_agent.py      # Base agent class
+│   │   ├── account_agent.py   # Account & Onboarding
+│   │   ├── delivery_agent.py  # Card Delivery
+│   │   ├── transaction_agent.py # Transaction & EMI
+│   │   ├── bill_agent.py      # Bill & Statement
+│   │   ├── repayment_agent.py # Repayments
+│   │   └── collections_agent.py # Collections
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── models.py          # Database models
+│   │   └── db.py              # Database connection
+│   └── utils/
+│       ├── __init__.py
+│       └── speech_to_text.py  # GCP Speech-to-Text integration
+├── nodejs_backend/
+│   ├── server.js              # Express server
+│   ├── routes/
+│   │   └── api.js             # API routes
+│   └── package.json
+├── ui/
+│   └── app.py                 # Streamlit UI
+├── database/
+│   └── init_db.py             # Database initialization script
+├── requirements.txt
+├── .env.example
+└── README.md
+```
+
+## Setup Instructions
+
+### Prerequisites
+
+- Python 3.8+
+- Node.js 14+
+- GCP account with Speech-to-Text API enabled
+- OpenAI API key (or compatible LLM service)
+
+### Installation
+
+1. **Clone the repository**
+```bash
+cd ayush
+```
+
+2. **Set up Python environment**
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+3. **Set up Node.js backend**
+```bash
+cd nodejs_backend
+npm install
+cd ..
+```
+
+4. **Configure environment variables**
+```bash
+cp .env.example .env
+# Edit .env with your API keys
+```
+
+5. **Initialize database**
+```bash
+python database/init_db.py
+```
+
+### Running the Application
+
+1. **Start Node.js API service** (Terminal 1)
+```bash
+cd nodejs_backend
+node server.js
+```
+
+2. **Start Python backend** (Terminal 2)
+```bash
+cd python_backend
+python app.py
+```
+
+3. **Start Streamlit UI** (Terminal 3)
+```bash
+streamlit run ui/app.py
+```
+
+The UI will be available at `http://localhost:8501`
+
+## Environment Variables
+
+Create a `.env` file with:
+```
+OPENAI_API_KEY=your_openai_key
+GCP_PROJECT_ID=your_gcp_project_id
+GCP_CREDENTIALS_PATH=path/to/credentials.json
+NODE_API_URL=http://localhost:3000
+```
+
+## Features
+
+### Query Categories
+- 💳 Account & Onboarding
+- 🚚 Card Delivery
+- 💰 Transaction & EMI
+- 📄 Bill & Statement
+- 💸 Repayments
+- 🚨 Collections
+
+### Task Types
+1. **Information Retrieval**: Read-only queries that fetch data
+2. **Action Execution**: Tasks requiring user consent (e.g., transactions, updates)
+
+## API Endpoints
+
+### Python Backend (Port 8000)
+- `POST /classify` - Classify user query
+- `POST /chat` - Process chat message
+- `POST /voice` - Process voice input
+
+### Node.js Backend (Port 3000)
+- `POST /api/transactions` - Mock transaction API
+- `POST /api/update-user` - Mock user update API
+- `GET /api/health` - Health check
+
+## Development Notes
+
+- Follows Single Responsibility Principle
+- Each agent handles one category
+- Classification uses low-token LLM calls
+- Action execution requires explicit user consent
+- Database uses SQLite for simplicity
+
+## Documentation
+
+- **README.md** - This file, project overview
+- **ARCHITECTURE.md** - Detailed system architecture
+- **DOCUMENTATION.md** - Complete API and usage documentation
+- **SETUP.md** - Quick setup guide
+- **AI_COPILOT_REPORT.md** - AI tools usage report
+
+## Quick Start
+
+See [SETUP.md](SETUP.md) for quick start instructions.
+
+For detailed documentation, see [DOCUMENTATION.md](DOCUMENTATION.md).
+
+For architecture details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
