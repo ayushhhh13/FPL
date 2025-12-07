@@ -9,6 +9,7 @@ The application follows a microservices architecture with:
 - **Node.js API Service**: External API integrations and mock services
 - **SQLite Database**: Local data storage
 - **Streamlit UI**: Web interface for chat and voice interactions
+<img width="853" height="621" alt="Screenshot 2025-12-07 at 11 49 28 PM" src="https://github.com/user-attachments/assets/36d6ca0b-3362-4477-b269-87a4c17f3082" />
 
 ## Project Structure
 
@@ -46,6 +47,27 @@ ayush/
 ├── .env.example
 └── README.md
 ```
+## Testing and Screenshots
+
+### Login Page
+<img width="1425" height="563" alt="Screenshot 2025-12-07 at 11 54 08 PM" src="https://github.com/user-attachments/assets/8403daa8-81d9-4ea5-a043-d72178cb0d40" />
+
+### Home Page
+<img width="1457" height="793" alt="Screenshot 2025-12-07 at 11 54 25 PM" src="https://github.com/user-attachments/assets/1ba5f5cf-d73e-40ff-9218-b29e0e33e084" />
+
+### Sample Inputs
+<img width="1434" height="791" alt="Screenshot 2025-12-07 at 11 55 25 PM" src="https://github.com/user-attachments/assets/43bf9978-0a01-419d-83ca-abab651221be" />
+
+### Voice Input
+<img width="1109" height="356" alt="Screenshot 2025-12-07 at 11 56 17 PM" src="https://github.com/user-attachments/assets/bd918d91-e8df-4161-9822-a85e8c9f9451" />
+
+<img width="1092" height="488" alt="Screenshot 2025-12-07 at 11 56 48 PM" src="https://github.com/user-attachments/assets/21cfc980-b934-43af-8ac6-01e6c9fc12fc" />
+
+<img width="1057" height="303" alt="Screenshot 2025-12-07 at 11 57 05 PM" src="https://github.com/user-attachments/assets/cd538699-f04e-4bf0-a981-965de5149663" />
+
+### Notification Broadcast to Whatsapp
+<img width="966" height="737" alt="Screenshot 2025-12-07 at 11 57 31 PM" src="https://github.com/user-attachments/assets/342c318a-ede1-4661-a8e1-1a91b1170b5f" />
+
 
 ## Setup Instructions
 
