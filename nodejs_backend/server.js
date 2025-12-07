@@ -26,13 +26,24 @@ app.get('/api/health', (req, res) => {
 
 // Mock transaction API
 app.post('/api/transactions', (req, res) => {
-  const { user_id, action, transaction_id, amount, emi_tenure } = req.body;
+  const { user_id, action, transaction_id, amount, emi_tenure, merchant, category } = req.body;
   
-  console.log('Transaction API called:', { user_id, action, transaction_id, amount });
+  console.log('Transaction API called:', { user_id, action, transaction_id, amount, merchant });
   
   // Simulate API processing delay
   setTimeout(() => {
-    if (action === 'make_payment') {
+    if (action === 'make_transaction') {
+      res.json({
+        success: true,
+        message: `Transaction of ₹${amount} processed successfully at ${merchant || 'merchant'}`,
+        transaction_id: `TXN${Date.now()}`,
+        amount: amount,
+        merchant: merchant || 'Unknown Merchant',
+        category: category || 'general',
+        status: 'completed',
+        timestamp: new Date().toISOString()
+      });
+    } else if (action === 'make_payment') {
       res.json({
         success: true,
         message: 'Payment processed successfully',

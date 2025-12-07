@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 
 from database.db import get_db, init_db
+from database.models import User, Transaction
 from classifier import QueryClassifier
 from utils.speech_to_text import SpeechToText
 from agents.account_agent import AccountAgent
@@ -15,6 +16,8 @@ from agents.transaction_agent import TransactionAgent
 from agents.bill_agent import BillAgent
 from agents.repayment_agent import RepaymentAgent
 from agents.collections_agent import CollectionsAgent
+from datetime import datetime
+import re
 
 load_dotenv()
 
@@ -241,13 +244,24 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
                 "message": "Action cancelled by user"
             }
         
+        # Check card status before allowing transactions/payments
+        if request.action in ["make_payment", "make_transaction"]:
+            user = db.query(User).filter(User.user_id == request.user_id).first()
+            if user and user.card_status == "blocked":
+                return {
+                    "success": False,
+                    "message": "❌ Transaction failed: Your card is currently blocked. Please unblock your card first to make transactions."
+                }
+        
         # Call Node.js API for action execution
         action_params = request.action_params or {}
         action_params["user_id"] = request.user_id
+        action_params["action"] = request.action
         
         # Map actions to API endpoints
         api_endpoints = {
             "make_payment": f"{node_api_url}/api/transactions",
+            "make_transaction": f"{node_api_url}/api/transactions",
             "update_email": f"{node_api_url}/api/update-user",
             "update_phone": f"{node_api_url}/api/update-user",
             "update_profile": f"{node_api_url}/api/update-user",
@@ -263,11 +277,45 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
         try:
             api_response = requests.post(endpoint, json=action_params, timeout=5)
             api_response.raise_for_status()
+            api_data = api_response.json()
+            
+            # Update database for block/unblock actions
+            if request.action in ["block_card", "unblock_card", "activate_card"]:
+                user = db.query(User).filter(User.user_id == request.user_id).first()
+                if user and "card_status" in api_data:
+                    user.card_status = api_data["card_status"]
+                    db.commit()
+                    print(f"✅ Updated card status to '{api_data['card_status']}' for user {request.user_id}")
+            
+            # Create transaction record for make_transaction
+            if request.action == "make_transaction" and api_data.get("success"):
+                amount = action_params.get("amount", 0)
+                merchant = action_params.get("merchant", "Unknown Merchant")
+                transaction_id = api_data.get("transaction_id", f"TXN{int(datetime.now().timestamp())}")
+                
+                new_transaction = Transaction(
+                    user_id=request.user_id,
+                    transaction_id=transaction_id,
+                    amount=float(amount),
+                    merchant=merchant,
+                    category=action_params.get("category", "general"),
+                    date=datetime.now(),
+                    status="completed"
+                )
+                db.add(new_transaction)
+                
+                # Update available credit
+                user = db.query(User).filter(User.user_id == request.user_id).first()
+                if user:
+                    user.available_credit = max(0, user.available_credit - float(amount))
+                
+                db.commit()
+                print(f"✅ Created transaction {transaction_id} for ₹{amount}")
             
             return {
                 "success": True,
                 "message": f"Action '{request.action}' executed successfully",
-                "data": api_response.json()
+                "data": api_data
             }
         except requests.exceptions.RequestException as e:
             return {
@@ -276,6 +324,7 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
             }
             
     except Exception as e:
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
 
