@@ -10,14 +10,20 @@ from database.db import get_db, init_db
 from database.models import User, Transaction
 from classifier import QueryClassifier
 from utils.speech_to_text import SpeechToText
+from utils.auth import hash_password, verify_password, create_access_token, decode_access_token
+from utils.email_service import GmailService
+from utils.whatsapp_service import WhatsAppService
 from agents.account_agent import AccountAgent
 from agents.delivery_agent import DeliveryAgent
 from agents.transaction_agent import TransactionAgent
 from agents.bill_agent import BillAgent
 from agents.repayment_agent import RepaymentAgent
 from agents.collections_agent import CollectionsAgent
-from datetime import datetime
+from datetime import datetime, timedelta
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Header
 import re
+import uuid
 
 load_dotenv()
 
@@ -35,6 +41,9 @@ app.add_middleware(
 # Initialize components
 classifier = QueryClassifier()
 speech_to_text = SpeechToText()
+email_service = GmailService()
+whatsapp_service = WhatsAppService()
+security = HTTPBearer()
 
 # Agent mapping
 AGENT_MAP = {
@@ -48,15 +57,13 @@ AGENT_MAP = {
 
 
 class ChatRequest(BaseModel):
-    """Chat request model."""
+    """Chat request model (for classify endpoint)."""
     message: str
-    user_id: str = "USER001"  # Default user for demo
 
 
 class VoiceRequest(BaseModel):
     """Voice request model."""
     audio_data: str  # Base64 encoded audio
-    user_id: str = "USER001"
 
 
 class ConsentRequest(BaseModel):
@@ -66,6 +73,43 @@ class ConsentRequest(BaseModel):
     consent: bool
     action: str
     action_params: Optional[dict] = None
+
+
+class SignupRequest(BaseModel):
+    """Signup request model."""
+    name: str
+    email: str
+    phone: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    """Login request model."""
+    email: str
+    password: str
+
+
+# Authentication dependency
+async def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db=Depends(get_db)
+) -> User:
+    """Get current authenticated user from JWT token."""
+    token = credentials.credentials
+    payload = decode_access_token(token)
+    
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    
+    user = db.query(User).filter(User.user_id == user_id).first()
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+    
+    return user
 
 
 @app.on_event("startup")
@@ -88,8 +132,132 @@ async def health():
         "status": "healthy",
         "speech_to_text_service": "AssemblyAI",
         "assemblyai_available": assemblyai_available,
-        "assemblyai_api_key_set": bool(os.getenv("ASSEMBLYAI_API_KEY"))
+        "assemblyai_api_key_set": bool(os.getenv("ASSEMBLYAI_API_KEY")),
+        "gmail_service_available": email_service.use_api,
+        "whatsapp_service_available": whatsapp_service.use_api,
+        "email_save_to_file": True,
+        "whatsapp_save_to_file": True
     }
+
+
+@app.post("/auth/signup")
+async def signup(request: SignupRequest, db=Depends(get_db)):
+    """
+    User signup endpoint.
+    
+    Args:
+        request: Signup request with name, email, phone, password
+        db: Database session
+        
+    Returns:
+        User info and access token
+    """
+    try:
+        # Check if user already exists
+        existing_user = db.query(User).filter(
+            (User.email == request.email) | (User.phone == request.phone)
+        ).first()
+        
+        if existing_user:
+            raise HTTPException(
+                status_code=400,
+                detail="User with this email or phone already exists"
+            )
+        
+        # Generate user_id
+        user_id = f"USER{str(uuid.uuid4())[:8].upper()}"
+        
+        # Create new user
+        new_user = User(
+            user_id=user_id,
+            name=request.name,
+            email=request.email,
+            phone=request.phone,
+            password_hash=hash_password(request.password),
+            card_number=f"CARD{str(uuid.uuid4())[:12].upper()}",
+            card_status="active",
+            credit_limit=100000.0,
+            available_credit=100000.0,
+            is_active=True
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user_id})
+        
+        return {
+            "success": True,
+            "message": "User registered successfully",
+            "user": {
+                "user_id": new_user.user_id,
+                "name": new_user.name,
+                "email": new_user.email,
+                "phone": new_user.phone
+            },
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error during signup: {str(e)}")
+
+
+@app.post("/auth/login")
+async def login(request: LoginRequest, db=Depends(get_db)):
+    """
+    User login endpoint.
+    
+    Args:
+        request: Login request with email and password
+        db: Database session
+        
+    Returns:
+        User info and access token
+    """
+    try:
+        # Find user by email
+        user = db.query(User).filter(User.email == request.email).first()
+        
+        if not user or not verify_password(request.password, user.password_hash):
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid email or password"
+            )
+        
+        if not user.is_active:
+            raise HTTPException(
+                status_code=403,
+                detail="Account is inactive"
+            )
+        
+        # Update last login
+        user.last_login = datetime.utcnow()
+        db.commit()
+        
+        # Create access token
+        access_token = create_access_token(data={"sub": user.user_id})
+        
+        return {
+            "success": True,
+            "message": "Login successful",
+            "user": {
+                "user_id": user.user_id,
+                "name": user.name,
+                "email": user.email,
+                "phone": user.phone
+            },
+            "access_token": access_token,
+            "token_type": "bearer"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during login: {str(e)}")
 
 
 @app.post("/classify")
@@ -115,12 +283,17 @@ async def classify_query(request: ChatRequest):
 
 
 @app.post("/chat")
-async def chat(request: ChatRequest, db=Depends(get_db)):
+async def chat(
+    message: str,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db)
+):
     """
     Process chat message and return response.
     
     Args:
-        request: Chat request with message and user_id
+        message: Chat message
+        current_user: Authenticated user
         db: Database session
         
     Returns:
@@ -128,7 +301,7 @@ async def chat(request: ChatRequest, db=Depends(get_db)):
     """
     try:
         # Classify query
-        classification = classifier.classify(request.message)
+        classification = classifier.classify(message)
         category = classification["category"]
         task_type = classification["task_type"]
         
@@ -137,7 +310,21 @@ async def chat(request: ChatRequest, db=Depends(get_db)):
         agent = AgentClass(db)
         
         # Process query
-        response = agent.process(request.message, request.user_id, task_type)
+        response = agent.process(message, current_user.user_id, task_type)
+        
+        # Send chat summary to email (async, don't wait for response)
+        try:
+            chat_messages = [
+                {"role": "user", "content": message},
+                {"role": "assistant", "content": response.get("answer", "No response")}
+            ]
+            email_service.send_chat_summary(
+                current_user.email,
+                current_user.name,
+                chat_messages
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to send email: {str(e)}")
         
         return {
             "success": True,
@@ -149,12 +336,17 @@ async def chat(request: ChatRequest, db=Depends(get_db)):
 
 
 @app.post("/voice")
-async def voice(request: VoiceRequest, db=Depends(get_db)):
+async def voice(
+    request: VoiceRequest,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db)
+):
     """
     Process voice input and return response.
     
     Args:
-        request: Voice request with audio data and user_id
+        request: Voice request with audio data
+        current_user: Authenticated user
         db: Database session
         
     Returns:
@@ -173,30 +365,19 @@ async def voice(request: VoiceRequest, db=Depends(get_db)):
         if not transcript:
             # Log more details for debugging
             print(f"❌ Audio transcription failed. Audio size: {len(audio_bytes)} bytes")
-            print(f"   GCP API Key present: {bool(os.getenv('GCP_API_KEY'))}")
             print(f"   Speech-to-text available: {speech_to_text.available}")
-            print(f"   Using REST API: {speech_to_text.use_rest_api if hasattr(speech_to_text, 'use_rest_api') else 'Unknown'}")
             
-            # Check for specific error messages from transcription
             error_msg = "Could not transcribe audio."
-            
-            # Check if audio is too small (likely empty or invalid)
             if len(audio_bytes) < 1000:
                 error_msg = "Audio file is too small. Please record a longer message (at least 2-3 seconds)."
-            else:
-                # Check logs for billing error (this would be in the transcription function)
-                # For now, provide a general message that includes billing as a possibility
-                error_msg = "Could not transcribe audio. Common causes: 1) GCP billing not enabled (most common), 2) Audio format not supported, 3) Audio contains only silence, 4) Network connectivity issues. Please check GCP billing status or use text input instead."
             
             return {
                 "success": False,
                 "error": error_msg,
                 "debug_info": {
                     "audio_size": len(audio_bytes),
-                    "gcp_available": speech_to_text.available,
-                    "gcp_api_key_set": bool(os.getenv('GCP_API_KEY')),
-                    "audio_too_small": len(audio_bytes) < 1000,
-                    "note": "If you see this error repeatedly, check if GCP billing is enabled for your project"
+                    "assemblyai_available": speech_to_text.available,
+                    "audio_too_small": len(audio_bytes) < 1000
                 }
             }
         
@@ -210,7 +391,21 @@ async def voice(request: VoiceRequest, db=Depends(get_db)):
         agent = AgentClass(db)
         
         # Process query
-        response = agent.process(transcript, request.user_id, task_type)
+        response = agent.process(transcript, current_user.user_id, task_type)
+        
+        # Send chat summary to email (async, don't wait for response)
+        try:
+            chat_messages = [
+                {"role": "user", "content": f"[Voice] {transcript}"},
+                {"role": "assistant", "content": response.get("answer", "No response")}
+            ]
+            email_service.send_chat_summary(
+                current_user.email,
+                current_user.name,
+                chat_messages
+            )
+        except Exception as e:
+            print(f"⚠️ Failed to send email: {str(e)}")
         
         return {
             "success": True,
@@ -223,12 +418,17 @@ async def voice(request: VoiceRequest, db=Depends(get_db)):
 
 
 @app.post("/consent")
-async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
+async def handle_consent(
+    request: ConsentRequest,
+    current_user: User = Depends(get_current_user),
+    db=Depends(get_db)
+):
     """
     Handle user consent for action execution.
     
     Args:
         request: Consent request with user decision
+        current_user: Authenticated user
         db: Database session
         
     Returns:
@@ -238,6 +438,10 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
         import requests
         node_api_url = os.getenv("NODE_API_URL", "http://localhost:3000")
         
+        # Verify user_id matches authenticated user
+        if request.user_id != current_user.user_id:
+            raise HTTPException(status_code=403, detail="User ID mismatch")
+        
         if not request.consent:
             return {
                 "success": False,
@@ -246,8 +450,7 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
         
         # Check card status before allowing transactions/payments
         if request.action in ["make_payment", "make_transaction"]:
-            user = db.query(User).filter(User.user_id == request.user_id).first()
-            if user and user.card_status == "blocked":
+            if current_user.card_status == "blocked":
                 return {
                     "success": False,
                     "message": "❌ Transaction failed: Your card is currently blocked. Please unblock your card first to make transactions."
@@ -255,7 +458,7 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
         
         # Call Node.js API for action execution
         action_params = request.action_params or {}
-        action_params["user_id"] = request.user_id
+        action_params["user_id"] = current_user.user_id
         action_params["action"] = request.action
         
         # Map actions to API endpoints
@@ -281,11 +484,10 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
             
             # Update database for block/unblock actions
             if request.action in ["block_card", "unblock_card", "activate_card"]:
-                user = db.query(User).filter(User.user_id == request.user_id).first()
-                if user and "card_status" in api_data:
-                    user.card_status = api_data["card_status"]
+                if "card_status" in api_data:
+                    current_user.card_status = api_data["card_status"]
                     db.commit()
-                    print(f"✅ Updated card status to '{api_data['card_status']}' for user {request.user_id}")
+                    print(f"✅ Updated card status to '{api_data['card_status']}' for user {current_user.user_id}")
             
             # Create transaction record for make_transaction
             if request.action == "make_transaction" and api_data.get("success"):
@@ -294,7 +496,7 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
                 transaction_id = api_data.get("transaction_id", f"TXN{int(datetime.now().timestamp())}")
                 
                 new_transaction = Transaction(
-                    user_id=request.user_id,
+                    user_id=current_user.user_id,
                     transaction_id=transaction_id,
                     amount=float(amount),
                     merchant=merchant,
@@ -305,12 +507,25 @@ async def handle_consent(request: ConsentRequest, db=Depends(get_db)):
                 db.add(new_transaction)
                 
                 # Update available credit
-                user = db.query(User).filter(User.user_id == request.user_id).first()
-                if user:
-                    user.available_credit = max(0, user.available_credit - float(amount))
+                current_user.available_credit = max(0, current_user.available_credit - float(amount))
                 
                 db.commit()
                 print(f"✅ Created transaction {transaction_id} for ₹{amount}")
+            
+            # Send WhatsApp notification for action execution
+            try:
+                action_details = {
+                    **action_params,
+                    **api_data,
+                    "timestamp": datetime.now().isoformat()
+                }
+                await whatsapp_service.send_action_notification(
+                    current_user.phone,
+                    request.action,
+                    action_details
+                )
+            except Exception as e:
+                print(f"⚠️ Failed to send WhatsApp notification: {str(e)}")
             
             return {
                 "success": True,

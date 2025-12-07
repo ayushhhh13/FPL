@@ -1,158 +1,259 @@
-# Architecture Documentation
+# System Architecture
 
-## System Architecture
+## Overview
 
-The Credit Card Assistant follows a microservices architecture with clear separation of concerns.
+The GenAI Credit Card Assistant is a microservices-based AI application that handles credit card customer queries and actions through natural language processing, supporting both text and voice inputs.
 
-### Components
+## Architecture Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      Streamlit UI                           │
-│              (Chat & Voice Interface)                        │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────────────┐
-│                  Python Backend (FastAPI)                   │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
-│  │ Classifier   │  │ Speech-to-   │  │   Agents     │     │
-│  │   (LLM)      │  │    Text      │  │  (6 types)   │     │
-│  └──────────────┘  └──────────────┘  └──────────────┘     │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-        ┌──────────────┼──────────────┐
-        │              │              │
-        ▼              ▼              ▼
-┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-│   SQLite     │ │  Node.js     │ │   GCP        │
-│  Database    │ │  API Service │ │  Speech API  │
-└──────────────┘ └──────────────┘ └──────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Streamlit UI (Port 8501)                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  • Chat Interface                                        │  │
+│  │  • Voice Input (Audio Recorder)                          │  │
+│  │  • Authentication (Login/Signup)                         │  │
+│  │  • Consent Management UI                                 │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ HTTP/REST
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              Python Backend - FastAPI (Port 8000)               │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Authentication Layer                                    │  │
+│  │  • JWT Token Management                                 │  │
+│  │  • User Authentication                                   │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Query Processing Pipeline                               │  │
+│  │  1. Speech-to-Text (AssemblyAI)                          │  │
+│  │  2. Query Classifier (OpenAI GPT)                       │  │
+│  │  3. Agent Router                                        │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Specialized Agents (6 Categories)                      │  │
+│  │  • AccountAgent      - Account & Onboarding             │  │
+│  │  • DeliveryAgent     - Card Delivery                    │  │
+│  │  • TransactionAgent  - Transactions & EMI                │  │
+│  │  • BillAgent         - Bills & Statements               │  │
+│  │  • RepaymentAgent    - Repayments                       │  │
+│  │  • CollectionsAgent  - Collections                       │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │  Notification Services                                   │  │
+│  │  • Email Service (Gmail API / File-based)               │  │
+│  │  • WhatsApp Service (File-based)                         │  │
+│  └──────────────────────────────────────────────────────────┘  │
+└────────────┬──────────────────────────────┬────────────────────┘
+             │                              │
+             │                              │
+    ┌────────▼────────┐          ┌────────▼────────┐
+    │  SQLite Database │          │  Node.js API    │
+    │   (Port N/A)     │          │  (Port 3000)    │
+    │                  │          │                  │
+    │ • Users          │          │ • Mock APIs      │
+    │ • Transactions   │          │ • Transactions  │
+    │ • Bills          │          │ • User Updates  │
+    │ • Deliveries     │          │ • Card Actions  │
+    │ • Repayments     │          │                  │
+    │ • Collections    │          │                  │
+    └──────────────────┘          └──────────────────┘
 ```
 
-### Data Flow
+## Component Details
 
-1. **User Input (Text/Voice)**
-   - User sends message via Streamlit UI
-   - Voice input is converted to text using GCP Speech-to-Text
+### 1. Streamlit UI (Frontend)
+- **Technology**: Streamlit
+- **Port**: 8501
+- **Features**:
+  - Real-time chat interface
+  - Voice recording and playback
+  - User authentication UI
+  - Consent approval interface
+  - Response visualization
 
-2. **Classification**
-   - Query is classified using low-token LLM call
-   - Returns category and task type (information/action)
+### 2. Python Backend (Core Logic)
+- **Technology**: FastAPI
+- **Port**: 8000
+- **Components**:
+  - **Authentication**: JWT-based user authentication
+  - **Speech-to-Text**: AssemblyAI integration for voice processing
+  - **Query Classifier**: OpenAI GPT for intelligent query routing
+  - **Agent System**: 6 specialized agents following Single Responsibility Principle
+  - **Database Layer**: SQLAlchemy ORM with SQLite
 
-3. **Agent Selection**
-   - Appropriate agent is selected based on category
-   - Agent processes query based on task type
+### 3. Node.js Backend (API Service)
+- **Technology**: Express.js
+- **Port**: 3000
+- **Purpose**: Mock external API services
+- **Endpoints**:
+  - Transaction processing
+  - User profile updates
+  - Card management (block/unblock/activate)
+  - Delivery tracking updates
 
-4. **Response Generation**
-   - Information queries: Read from database and return data
-   - Action queries: Return action details and request consent
+### 4. Database (Data Persistence)
+- **Technology**: SQLite
+- **Schema**:
+  - Users (authentication, profile, card info)
+  - Transactions (payment history)
+  - Bills (statements, due dates)
+  - Card Deliveries (tracking, addresses)
+  - Repayments (payment history)
+  - Collections (overdue management)
 
-5. **Action Execution**
-   - If user consents, action is sent to Node.js API
-   - Node.js API simulates external service calls
-   - Result is returned to user
+## Data Flow
+
+### Text Query Flow
+```
+User Input (Text)
+    ↓
+Streamlit UI
+    ↓
+POST /chat (FastAPI)
+    ↓
+JWT Authentication
+    ↓
+Query Classifier (OpenAI)
+    ↓
+Agent Selection (Based on Category)
+    ↓
+Agent Processing
+    ├─ Information Query → Database Query → Response
+    └─ Action Query → Consent Request → User Approval → Node.js API → Response
+    ↓
+Email/WhatsApp Notification (Async)
+    ↓
+Response to UI
+```
+
+### Voice Query Flow
+```
+User Voice Input
+    ↓
+Streamlit UI (Audio Recording)
+    ↓
+POST /voice (FastAPI)
+    ↓
+JWT Authentication
+    ↓
+Speech-to-Text (AssemblyAI)
+    ↓
+Query Classifier (OpenAI)
+    ↓
+[Same as Text Query Flow]
+```
+
+## Agent Architecture
+
+### Base Agent Pattern
+All agents inherit from `BaseAgent` and implement:
+- `process(query, user_id, task_type)` - Main processing method
+- `handle_information(query, user_id)` - Information retrieval
+- `handle_action(query, user_id)` - Action execution with consent
 
 ### Agent Categories
 
-1. **AccountAgent** - Account & Onboarding
-   - Information: Account balance, card status, profile
-   - Actions: Update email/phone, activate card
+1. **AccountAgent**
+   - Information: Balance, credit limit, card status, profile
+   - Actions: Update email/phone, activate/block/unblock card
 
-2. **DeliveryAgent** - Card Delivery
-   - Information: Tracking status, delivery address
-   - Actions: Update address, reschedule delivery
+2. **DeliveryAgent**
+   - Information: Delivery status, tracking number, address
+   - Actions: Update delivery address, reschedule delivery
 
-3. **TransactionAgent** - Transaction & EMI
-   - Information: Transaction history, EMI details
-   - Actions: Dispute transaction, convert to EMI
+3. **TransactionAgent**
+   - Information: Transaction history, EMI details, disputes
+   - Actions: Make transaction, dispute transaction, convert to EMI
 
-4. **BillAgent** - Bill & Statement
+4. **BillAgent**
    - Information: Bill amount, due date, statements
    - Actions: Download statement, email statement
 
-5. **RepaymentAgent** - Repayments
+5. **RepaymentAgent**
    - Information: Payment history, payment methods
    - Actions: Make payment, schedule payment
 
-6. **CollectionsAgent** - Collections
+6. **CollectionsAgent**
    - Information: Overdue amounts, payment plans
-   - Actions: Setup payment plan, pay overdue
+   - Actions: Setup payment plan, pay overdue amount
 
-### Design Principles
+## Design Principles
 
-1. **Single Responsibility Principle**
-   - Each agent handles one category
-   - Classifier only classifies
-   - Speech-to-text only converts audio
+### 1. Single Responsibility Principle
+- Each agent handles one specific category
+- Classifier only classifies queries
+- Speech-to-Text only converts audio
+- Database layer only handles data persistence
 
-2. **Separation of Concerns**
-   - Python backend: Business logic
-   - Node.js backend: External API simulation
-   - Database: Data persistence
-   - UI: User interaction
+### 2. Separation of Concerns
+- **UI Layer**: User interaction and presentation
+- **Business Logic**: Python backend with agents
+- **External APIs**: Node.js backend for mock services
+- **Data Layer**: SQLite database
 
-3. **Consent Management**
-   - All actions require explicit user consent
-   - Consent is requested before execution
-   - User can approve or cancel
+### 3. Consent Management
+- All actions require explicit user consent
+- Consent is requested before execution
+- User can approve or cancel any action
+- Actions are logged for audit purposes
 
-### Database Schema
+### 4. Scalability
+- Microservices architecture allows independent scaling
+- Database can be upgraded to PostgreSQL/MySQL
+- Agents can be distributed across services
+- Stateless design enables horizontal scaling
 
-- **users**: User account information
-- **card_deliveries**: Card delivery tracking
-- **transactions**: Transaction records
-- **bills**: Bill and statement records
-- **repayments**: Repayment history
-- **collections**: Collections information
+## Security Features
 
-### API Endpoints
+1. **Authentication**: JWT-based token authentication
+2. **Password Hashing**: bcrypt for secure password storage
+3. **Authorization**: User-specific data access
+4. **Input Validation**: Pydantic models for request validation
+5. **CORS**: Configured for secure cross-origin requests
 
-#### Python Backend (Port 8000)
-- `POST /chat` - Process chat message
-- `POST /voice` - Process voice input
-- `POST /classify` - Classify query
-- `POST /consent` - Handle user consent
+## Technology Stack
 
-#### Node.js Backend (Port 3000)
-- `POST /api/transactions` - Mock transaction API
-- `POST /api/update-user` - Mock user update API
-- `POST /api/delivery` - Mock delivery API
-- `GET /api/health` - Health check
+### Backend
+- **Python 3.8+**: FastAPI, SQLAlchemy, OpenAI, AssemblyAI
+- **Node.js 14+**: Express.js
+- **Database**: SQLite (production-ready for PostgreSQL)
 
-### Scalability Considerations
+### Frontend
+- **Streamlit**: Web UI framework
+- **Audio Recorder**: Streamlit audio recorder component
 
-1. **Horizontal Scaling**
-   - Python backend can be replicated
-   - Node.js backend can be load balanced
-   - Database can be moved to PostgreSQL/MySQL
+### AI/ML
+- **OpenAI GPT**: Query classification
+- **AssemblyAI**: Speech-to-Text conversion
 
-2. **Interface Agnostic**
-   - Architecture supports multiple interfaces
-   - Can add WhatsApp, RCS, mobile app channels
-   - Voice and text handled uniformly
+### External Services
+- **Gmail API**: Email notifications (optional)
+- **WhatsApp API**: WhatsApp notifications (optional, file-based fallback)
 
-3. **Medium Agnostic**
-   - Text and voice processed similarly
-   - Voice converted to text before processing
-   - Response can be converted to speech if needed
+## Deployment Architecture
 
-### Security Considerations
+### Development
+- All services run locally
+- SQLite for database
+- File-based notifications
 
-1. **Authentication**: Add user authentication
-2. **Authorization**: Verify user permissions
-3. **Data Encryption**: Encrypt sensitive data
-4. **API Security**: Add API keys/tokens
-5. **Input Validation**: Validate all inputs
+### Production (Recommended)
+- **UI**: Streamlit Cloud or Docker container
+- **Python Backend**: Docker container or cloud service (AWS/GCP)
+- **Node.js Backend**: Docker container or cloud service
+- **Database**: PostgreSQL or MySQL
+- **Load Balancer**: For horizontal scaling
+- **Message Queue**: For async notifications
 
-### Future Enhancements
+## Future Enhancements
 
-1. Add authentication and authorization
-2. Support multiple languages
-3. Add voice response (text-to-speech)
-4. Integrate with real payment gateways
-5. Add analytics and monitoring
-6. Implement caching for better performance
-7. Add rate limiting
-8. Support file uploads for statements
-
+1. **Multi-language Support**: Internationalization
+2. **Text-to-Speech**: Voice responses
+3. **Real Payment Integration**: Actual payment gateways
+4. **Analytics Dashboard**: Usage metrics and insights
+5. **Caching Layer**: Redis for performance
+6. **Rate Limiting**: API protection
+7. **Monitoring**: Logging and error tracking
+8. **CI/CD Pipeline**: Automated deployment

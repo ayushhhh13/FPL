@@ -15,12 +15,15 @@ class User(Base):
     user_id = Column(String, unique=True, index=True)
     name = Column(String)
     email = Column(String, unique=True, index=True)
-    phone = Column(String)
+    phone = Column(String, unique=True, index=True)
+    password_hash = Column(String)  # Hashed password
     card_number = Column(String, unique=True, index=True)
     card_status = Column(String)  # active, blocked, expired
     credit_limit = Column(Float)
     available_credit = Column(Float)
+    is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    last_login = Column(DateTime, nullable=True)
     
     # Relationships
     transactions = relationship("Transaction", back_populates="user")

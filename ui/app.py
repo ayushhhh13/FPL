@@ -22,25 +22,80 @@ st.set_page_config(
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "user_id" not in st.session_state:
-    st.session_state.user_id = "USER001"
+    st.session_state.user_id = None
+if "access_token" not in st.session_state:
+    st.session_state.access_token = None
+if "user_info" not in st.session_state:
+    st.session_state.user_info = None
 if "pending_consent" not in st.session_state:
     st.session_state.pending_consent = None
 if "last_processed_audio" not in st.session_state:
     st.session_state.last_processed_audio = None
 if "last_processed_message" not in st.session_state:
     st.session_state.last_processed_message = None
+if "show_signup" not in st.session_state:
+    st.session_state.show_signup = False
+
+
+def login_user(email: str, password: str):
+    """Login user and get access token."""
+    try:
+        response = requests.post(
+            f"{PYTHON_API_URL}/auth/login",
+            json={"email": email, "password": password},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            return {"success": False, "error": "Invalid email or password"}
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def signup_user(name: str, email: str, phone: str, password: str):
+    """Sign up new user."""
+    try:
+        response = requests.post(
+            f"{PYTHON_API_URL}/auth/signup",
+            json={"name": name, "email": email, "phone": phone, "password": password},
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 400:
+            error_detail = e.response.json().get("detail", "User already exists")
+            return {"success": False, "error": error_detail}
+        return {"success": False, "error": str(e)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def send_chat_message(message: str):
     """Send chat message to Python backend."""
     try:
+        headers = {}
+        if st.session_state.access_token:
+            headers["Authorization"] = f"Bearer {st.session_state.access_token}"
+        
         response = requests.post(
             f"{PYTHON_API_URL}/chat",
-            json={"message": message, "user_id": st.session_state.user_id},
+            params={"message": message},
+            headers=headers,
             timeout=10
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            st.session_state.access_token = None
+            st.session_state.user_info = None
+            st.session_state.user_id = None
+            return {"success": False, "error": "Session expired. Please login again."}
+        return {"success": False, "error": str(e)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -53,9 +108,14 @@ def send_voice_message(audio_bytes: bytes):
         
         audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
         
+        headers = {}
+        if st.session_state.access_token:
+            headers["Authorization"] = f"Bearer {st.session_state.access_token}"
+        
         response = requests.post(
             f"{PYTHON_API_URL}/voice",
-            json={"audio_data": audio_b64, "user_id": st.session_state.user_id},
+            json={"audio_data": audio_b64},
+            headers=headers,
             timeout=30
         )
         response.raise_for_status()
@@ -66,6 +126,13 @@ def send_voice_message(audio_bytes: bytes):
             print(f"Voice API error: {result.get('error')}")
         
         return result
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            st.session_state.access_token = None
+            st.session_state.user_info = None
+            st.session_state.user_id = None
+            return {"success": False, "error": "Session expired. Please login again."}
+        return {"success": False, "error": str(e)}
     except requests.exceptions.Timeout:
         return {"success": False, "error": "Request timed out. The audio might be too long or the server is slow."}
     except requests.exceptions.ConnectionError:
@@ -77,6 +144,10 @@ def send_voice_message(audio_bytes: bytes):
 def handle_consent(consent: bool, action: str, action_params: dict = None):
     """Handle user consent for action execution."""
     try:
+        headers = {}
+        if st.session_state.access_token:
+            headers["Authorization"] = f"Bearer {st.session_state.access_token}"
+        
         response = requests.post(
             f"{PYTHON_API_URL}/consent",
             json={
@@ -86,22 +157,108 @@ def handle_consent(consent: bool, action: str, action_params: dict = None):
                 "action": action,
                 "action_params": action_params or {}
             },
+            headers=headers,
             timeout=10
         )
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            st.session_state.access_token = None
+            st.session_state.user_info = None
+            st.session_state.user_id = None
+            return {"success": False, "error": "Session expired. Please login again."}
+        return {"success": False, "error": str(e)}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-# Main UI
+# Authentication check
+if not st.session_state.access_token:
+    # Show login/signup page
+    st.title("💳 Credit Card Assistant")
+    st.markdown("### Please login or sign up to continue")
+    
+    if st.session_state.show_signup:
+        st.subheader("Sign Up")
+        with st.form("signup_form"):
+            name = st.text_input("Full Name", placeholder="John Doe")
+            email = st.text_input("Email", placeholder="john@example.com")
+            phone = st.text_input("Phone Number", placeholder="+919876543210")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            confirm_password = st.text_input("Confirm Password", type="password", placeholder="Confirm password")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_signup = st.form_submit_button("Sign Up", use_container_width=True)
+            with col2:
+                back_to_login = st.form_submit_button("Back to Login", use_container_width=True)
+            
+            if submit_signup:
+                if not all([name, email, phone, password, confirm_password]):
+                    st.error("Please fill in all fields")
+                elif password != confirm_password:
+                    st.error("Passwords do not match")
+                elif len(password) < 6:
+                    st.error("Password must be at least 6 characters long")
+                else:
+                    result = signup_user(name, email, phone, password)
+                    if result.get("success"):
+                        st.session_state.access_token = result.get("access_token")
+                        st.session_state.user_info = result.get("user")
+                        st.session_state.user_id = result.get("user", {}).get("user_id")
+                        st.session_state.show_signup = False
+                        st.success("Sign up successful! Redirecting...")
+                        st.rerun()
+                    else:
+                        st.error(result.get("error", "Sign up failed"))
+            
+            if back_to_login:
+                st.session_state.show_signup = False
+                st.rerun()
+    else:
+        st.subheader("Login")
+        with st.form("login_form"):
+            email = st.text_input("Email", placeholder="john@example.com")
+            password = st.text_input("Password", type="password", placeholder="Enter password")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submit_login = st.form_submit_button("Login", use_container_width=True, type="primary")
+            with col2:
+                show_signup = st.form_submit_button("Sign Up", use_container_width=True)
+            
+            if submit_login:
+                if not email or not password:
+                    st.error("Please enter both email and password")
+                else:
+                    result = login_user(email, password)
+                    if result.get("success"):
+                        st.session_state.access_token = result.get("access_token")
+                        st.session_state.user_info = result.get("user")
+                        st.session_state.user_id = result.get("user", {}).get("user_id")
+                        st.success("Login successful! Redirecting...")
+                        st.rerun()
+                    else:
+                        st.error(result.get("error", "Login failed"))
+            
+            if show_signup:
+                st.session_state.show_signup = True
+                st.rerun()
+    
+    st.stop()
+
+# Main UI (only shown if authenticated)
 st.title("💳 Credit Card Assistant")
 st.markdown("Ask me anything about your credit card account!")
 
 # Sidebar
 with st.sidebar:
-    st.header("Settings")
-    st.session_state.user_id = st.text_input("User ID", value=st.session_state.user_id)
+    st.header("Account")
+    if st.session_state.user_info:
+        st.markdown(f"**Name:** {st.session_state.user_info.get('name', 'N/A')}")
+        st.markdown(f"**Email:** {st.session_state.user_info.get('email', 'N/A')}")
+        st.markdown(f"**User ID:** {st.session_state.user_info.get('user_id', 'N/A')}")
     
     st.markdown("---")
     st.markdown("### Query Categories")
@@ -115,14 +272,24 @@ with st.sidebar:
     """)
     
     st.markdown("---")
-    if st.button("Clear Chat", type="secondary", use_container_width=True):
-        # Clear all chat-related session state
-        st.session_state.messages = []
-        st.session_state.pending_consent = None
-        st.session_state.last_processed_message = None
-        st.session_state.last_processed_audio = None
-        # Force rerun to update the UI
-        st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("Clear Chat", type="secondary", use_container_width=True):
+            # Clear all chat-related session state
+            st.session_state.messages = []
+            st.session_state.pending_consent = None
+            st.session_state.last_processed_message = None
+            st.session_state.last_processed_audio = None
+            # Force rerun to update the UI
+            st.rerun()
+    with col2:
+        if st.button("Logout", use_container_width=True):
+            st.session_state.access_token = None
+            st.session_state.user_info = None
+            st.session_state.user_id = None
+            st.session_state.messages = []
+            st.session_state.pending_consent = None
+            st.rerun()
 
 # Display chat messages
 if st.session_state.messages:

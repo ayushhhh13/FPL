@@ -16,3 +16,15 @@ credentials/
 node_modules/
 .DS_Store
 
+# Temporary files
+whatsapp_messages/*.txt
+emails/*.html
+*.tmp
+*.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
